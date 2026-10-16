@@ -345,11 +345,74 @@ key_file  = "/etc/circus/tls/build-01.key"  # omit cert_file + key_file for toke
 > See the relevant [certificate setup section](#tls-certificates) on how to
 > create your certificates, and sample configuration.
 
-Each persistent agent needs its own random token and a matching runner entry.
-The entry's UUID is the agent's `<work_dir>/machine_id`, so either copy the one
-an existing agent generated or write a fresh UUID there before first start
-(`agent.machine_id_file` points elsewhere if needed). The UUID and `agent.name`
-must match the entry exactly.
+### Provisioning a persistent agent
+
+Give each persistent agent its own UUID, name, and random bearer token before
+first start. The agent sends the raw token. The runner checks its SHA-256 hex
+digest against the configured hash.
+
+#### Generate the token and hash
+
+Run this on a trusted workstation or the agent host. It requires OpenSSL and GNU
+Coreutils:
+
+```sh
+export CIRCUS_AGENT_TOKEN="$(openssl rand -hex 32)"
+export CIRCUS_AGENT_TOKEN_HASH="$(
+  printf '%s' "$CIRCUS_AGENT_TOKEN" | sha256sum | cut -d' ' -f1
+)"
+
+printf 'raw token: %s\n' "$CIRCUS_AGENT_TOKEN"
+printf 'token hash: %s\n' "$CIRCUS_AGENT_TOKEN_HASH"
+```
+
+Put the raw token in the agent's `auth_token` setting or `CIRCUS_AGENT_TOKEN`
+environment variable. Put the hash in the runner's `token_hash` setting. Use
+`printf '%s'` when hashing. A trailing newline changes the hash. Agent tokens
+are separate from HTTP API keys.
+
+Save the raw token in your secret store. You cannot recover it from the hash.
+Keep it out of version control, logs, and the Nix store. With the NixOS module,
+pass a secret file through `services.circus-agent.authTokenFile`.
+
+#### Pre-provision the machine UUID
+
+Circus has no enrollment or UUID-initialization command. A persistent agent
+reads its UUID from `agent.machine_id_file`, which defaults to
+`<work_dir>/machine_id`. If the file is missing or invalid, the agent generates
+and saves a UUID at startup. To configure the runner first, use `uuidgen -r` to
+generate a UUIDv4 and write it to this file before starting the agent.
+
+This Linux example uses the default path and the NixOS module's `circus-agent`
+service account. Run it as root after creating the account, before the service
+starts:
+
+```sh
+(
+  set -euC # Refuse to overwrite an existing machine_id.
+  umask 027
+  machine_id="$(uuidgen -r | tr '[:upper:]' '[:lower:]')"
+  install -d -m 0750 -o circus-agent -g circus-agent /var/lib/circus-agent
+  printf '%s\n' "$machine_id" > /var/lib/circus-agent/machine_id
+  chown circus-agent:circus-agent /var/lib/circus-agent/machine_id
+  chmod 0640 /var/lib/circus-agent/machine_id
+  printf 'machine ID: %s\n' "$machine_id"
+)
+```
+
+Adjust the path and ownership for your installation. Give the service account
+read access to the file and write access to its parent directory. If you set
+`agent.machine_id_file`, write the file at that path. The setting takes a file
+path, not a UUID.
+
+Generate the UUID once. If you use configuration management, deploy the same
+file on each activation. Keep an existing agent's UUID rather than replacing it.
+
+In the configuration examples above, set the runner's `machine_id` to the
+printed UUID and use the same `name` on the runner and agent. Load the updated
+runner configuration before starting the agent.
+
+### Agent lifecycle and services
 
 CI builders authenticate with OIDC and run with `agent.ephemeral` or
 `--ephemeral`. An ephemeral agent makes up a fresh machine ID, can append a
