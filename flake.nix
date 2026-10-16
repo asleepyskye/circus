@@ -330,24 +330,23 @@
         inputsFrom = [self.packages.${system}.circus-server];
 
         strictDeps = true;
-        packages = with pkgs;
-          [
-            pkg-config
-            postgresql_18
-            # DB query codegen: `scripts/codegen.sh` runs `cornucopia live`.
-            (cornucopiaFor pkgs)
+        buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [pkgs.glibc.dev];
+        nativeBuildInputs = with pkgs; [
+          pkg-config
+          postgresql_18
+          # DB query codegen: `scripts/codegen.sh` runs `cornucopia live`.
+          (cornucopiaFor pkgs)
 
-            # circus-evaluator builds evix's Nix C bindings.
-            nixVersions.nix_2_34.dev
+          # circus-evaluator builds evix's Nix C bindings.
+          nixVersions.nix_2_34.dev
 
-            taplo
-            cargo-deny
-            cargo-nextest
-            clippy
-            rust-analyzer
-            (rustfmt.override {asNightly = true;})
-          ]
-          ++ lib.optionals stdenv.hostPlatform.isLinux [glibc.dev];
+          # Additional Cargo tooling
+          clippy
+          rust-analyzer
+          (rustfmt.override {asNightly = true;})
+          cargo-deny
+          cargo-nextest
+        ];
 
         # bindgen (via nix-bindings-sys) needs libclang and a glibc sysroot.
         LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
